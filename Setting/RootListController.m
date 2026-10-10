@@ -18,7 +18,6 @@ static NSString *getPrefsPath(void) {
     return PREFS_PATH_ROOTFUL;
 }
 
-// Các key bắt buộc phải lưu dạng int (vì PSSliderCell trả float)
 static NSSet *intKeys(void) {
     static NSSet *s;
     static dispatch_once_t once;
@@ -31,7 +30,6 @@ static NSSet *intKeys(void) {
     return s;
 }
 
-// ── Live info helpers ───────────────────────────────────────────────────────
 static float readCPUTemp(void) {
     int level = 0; size_t sz = sizeof(level);
     if (sysctlbyname("machdep.xcpm.cpu_thermal_level", &level, &sz, NULL, 0) == 0)
@@ -62,48 +60,123 @@ static float readFreeRAMMB(void) {
 
 - (NSArray *)specifiers {
     if (!_specifiers) {
-        // [ĐÃ SỬA]: Bỏ retain để tuân thủ ARC
         _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
+        [self updateModeCellTitle];
     }
     return _specifiers;
 }
 
+// Cập nhật tên hiển thị ngoài menu tương ứng chế độ đang chạy
+- (void)updateModeCellTitle {
+    PSSpecifier *spec = [self specifierForID:@"currentModeCell"];
+    if (spec) {
+        NSString *path = getPrefsPath();
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path];
+        int mode = [prefs[@"currentMode"] ?: @(1) intValue];
+        NSArray *names = @[@"🍃 Tiết kiệm", @"⚖️ Cân bằng", @"⚡ Hiệu năng", @"🔥 Turbo"];
+        NSString *name = (mode >= 0 && mode < (int)names.count) ? names[mode] : @"⚖️ Cân bằng";
+        NSString *display = [NSString stringWithFormat:@"🎯 Chế độ: %@", name];
+        spec.name = display;
+        [spec setProperty:display forKey:@"label"];
+    }
+}
+
+#pragma mark - Popup Menu chọn chế độ
+
+- (void)showModeMenu:(PSSpecifier *)specifier {
+    NSString *path = getPrefsPath();
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path];
+    int currentMode = [prefs[@"currentMode"] ?: @(1) intValue];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"🎯 CHỌN CHẾ ĐỘ HIỆU NĂNG"
+                                                                   message:@"Cấu hình sẽ được kích hoạt tức thì không cần Respring:"
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+    NSArray *modes = @[
+        @"🍃 Tiết kiệm (15Hz - 60Hz)",
+        @"⚖️ Cân bằng (Ổn định pin)",
+        @"⚡ Hiệu năng (Mượt mà)",
+        @"🔥 Turbo (Tối đa phần cứng)"
+    ];
+
+    for (int i = 0; i < (int)modes.count; i++) {
+        int targetMode = i;
+        NSString *title = modes[i];
+        if (targetMode == currentMode) {
+            title = [NSString stringWithFormat:@"✓ %@", title];
+        }
+
+        UIAlertAction *action = [UIAlertAction actionWithTitle:title
+                                                         style:UIAlertActionStyleDefault
+                                                       handler:^(UIAlertAction * _Nonnull act) {
+            [self selectMode:targetMode];
+        }];
+        [alert addAction:action];
+    }
+
+    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Đóng"
+                                                     style:UIAlertActionStyleCancel
+                                                   handler:nil];
+    [alert addAction:cancel];
+
+    // Chống crash trên iPad khi mở ActionSheet
+    if (alert.popoverPresentationController) {
+        UIView *sourceView = self.view;
+        if ([self respondsToSelector:@selector(cachedCellForSpecifier:)]) {
+            UITableViewCell *cell = [(id)self cachedCellForSpecifier:specifier];
+            if (cell) sourceView = cell;
+        }
+        alert.popoverPresentationController.sourceView = sourceView;
+        alert.popoverPresentationController.sourceRect = sourceView.bounds;
+    }
+
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)selectMode:(int)mode {
+    NSString *path = getPrefsPath();
+    NSString *dir = [path stringByDeletingLastPathComponent];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:dir]) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+
+    NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary dictionary];
+    prefs[@"currentMode"] = @(mode);
+    [prefs writeToFile:path atomically:YES];
+
+    notify_post(NOTIFY_NAME);
+
+    [self updateModeCellTitle];
+    PSSpecifier *modeCell = [self specifierForID:@"currentModeCell"];
+    if (modeCell) [self reloadSpecifier:modeCell animated:YES];
+
+    PSSpecifier *live = [self specifierForID:@"liveInfoCell"];
+    if (live) [self reloadSpecifier:live animated:NO];
+}
+
 #pragma mark - Ghi mọi thay đổi vào plist + notify tweak
 
-// [ĐÃ SỬA]: Selector chuẩn của PSListController là specifier:, không phải forSpecifier:
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
     id stored = value;
 
-    // PSSliderCell / PSSegmentedCell có thể trả NSNumber float → ép int cho key số
     if (key && [intKeys() containsObject:key]) {
         if ([value respondsToSelector:@selector(intValue)])
             stored = @([value intValue]);
     }
 
-    // currentMode: clamp 0..3
-    if ([key isEqualToString:@"currentMode"]) {
-        int m = [stored intValue];
-        if (m < 0) m = 0;
-        if (m > 3) m = 3;
-        stored = @(m);
-    }
-
-    // Ngưỡng nhiệt: clamp 35..60
     if ([key isEqualToString:@"tempThreshold"]) {
         int t = [stored intValue];
         if (t < 35) t = 35;
         if (t > 60) t = 60;
         stored = @(t);
     }
-    // Ngưỡng pin: clamp 5..50
     if ([key isEqualToString:@"batteryThreshold"]) {
         int b = [stored intValue];
         if (b < 5)  b = 5;
         if (b > 50) b = 50;
         stored = @(b);
     }
-    // Chu kỳ dọn: clamp 600..7200
     if ([key isEqualToString:@"autoCleanInterval"]) {
         int s = [stored intValue];
         if (s < 600)  s = 600;
@@ -111,7 +184,6 @@ static float readFreeRAMMB(void) {
         stored = @(s);
     }
 
-    // [ĐÃ SỬA]: Gọi super với đúng selector
     [super setPreferenceValue:stored specifier:specifier];
 
     if (key.length) {
@@ -128,7 +200,6 @@ static float readFreeRAMMB(void) {
     }
     notify_post(NOTIFY_NAME);
 
-    // Cập nhật dòng "Trạng thái" nếu có
     PSSpecifier *live = [self specifierForID:@"liveInfoCell"];
     if (live) [self reloadSpecifier:live animated:NO];
 }
@@ -141,8 +212,6 @@ static float readFreeRAMMB(void) {
     if (v) return v;
     return [specifier propertyForKey:@"default"];
 }
-
-#pragma mark - Live Info cell (tùy chọn, an toàn nếu plist không có)
 
 - (id)liveInfo:(PSSpecifier *)specifier {
     NSString *path = getPrefsPath();
@@ -158,12 +227,13 @@ static float readFreeRAMMB(void) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self updateModeCellTitle];
     [self reloadSpecifiers];
 
-    // [ĐÃ SỬA]: Đăng ký dispatch với biến token hợp lệ, tránh đăng ký lặp
     if (!_isNotifyRegistered) {
         notify_register_dispatch(NOTIFY_NAME, &_notifyToken, dispatch_get_main_queue(),
                                  ^(int token) {
+            [self updateModeCellTitle];
             [self reloadSpecifiers];
         });
         _isNotifyRegistered = YES;
@@ -183,7 +253,6 @@ static float readFreeRAMMB(void) {
     [_liveTimer invalidate];
     _liveTimer = nil;
 
-    // [ĐÃ SỬA]: Hủy token khi thoát trang cài đặt
     if (_isNotifyRegistered) {
         notify_cancel(_notifyToken);
         _isNotifyRegistered = NO;
