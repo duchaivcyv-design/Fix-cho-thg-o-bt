@@ -14,21 +14,13 @@ permissions:
 jobs:
   build:
     name: Build rootless .deb
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git make clang fakeroot dpkg-dev \
-            libssl-dev libplist-dev libxml2-dev libz-dev \
-            zip unzip xz-utils curl
 
       - name: Set Theos env
         run: |
@@ -40,58 +32,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/theos
-          key: theos-ubuntu-v3
+          key: theos-macos-cache-v1
 
       - name: Clone Theos
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
-          git clone --recursive --depth 1 \
-            https://github.com/theos/theos.git $THEOS
+          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
 
       - name: Download iOS 16.5 SDK
         run: |
-          set -e
-          mkdir -p "$THEOS/sdks"
-          cd "$THEOS/sdks"
-          if [ -d "iPhoneOS16.5.sdk" ]; then
+          if [ -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
             echo "✅ SDK đã có sẵn"
             exit 0
           fi
-
-          URLS=(
-            "https://github.com/theos/sdks/releases/download/iPhoneOS16.5.sdk/iPhoneOS16.5.sdk.tar.xz"
-            "https://github.com/xybp888/iOS-SDKs/releases/download/16.5/iPhoneOS16.5.sdk.tar.xz"
-            "https://github.com/Lessica/iOS-SDKs/raw/master/iPhoneOS16.5.sdk.tar.xz"
-          )
-
-          for URL in "${URLS[@]}"; do
-            echo "⬇️  Thử: $URL"
-            if curl -L -f --connect-timeout 15 --max-time 300 -o sdk.tar.xz "$URL"; then
-              SIZE=$(stat -c%s sdk.tar.xz)
-              if [ "$SIZE" -gt 1000000 ] && file sdk.tar.xz | grep -q "XZ compressed"; then
-                echo "✅ Tải xong: $SIZE bytes"
-                tar -xf sdk.tar.xz
-                rm -f sdk.tar.xz
-                break
-              else
-                echo "⚠️  File không hợp lệ ($SIZE bytes)"
-                rm -f sdk.tar.xz
-              fi
-            fi
-          done
-
-          test -d "iPhoneOS16.5.sdk" || { echo "❌ Không tải được SDK"; exit 1; }
-          ls -la
-
-      - name: Download ldid
-        run: |
-          mkdir -p "$THEOS/toolchain/linux/iphone/bin"
-          if [ ! -x "$THEOS/toolchain/linux/iphone/bin/ldid" ]; then
-            curl -L -o "$THEOS/toolchain/linux/iphone/bin/ldid" \
-              https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64
-            chmod +x "$THEOS/toolchain/linux/iphone/bin/ldid"
-          fi
-          "$THEOS/toolchain/linux/iphone/bin/ldid" -v
+          rm -rf "$THEOS/sdks"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$THEOS/sdks"
+          cd "$THEOS/sdks"
+          git sparse-checkout set iPhoneOS16.5.sdk
+          echo "✅ Đã tải xong iPhoneOS16.5.sdk:"
+          ls -la iPhoneOS16.5.sdk
 
       - name: Build .deb
         run: |
