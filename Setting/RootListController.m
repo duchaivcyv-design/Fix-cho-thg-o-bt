@@ -4,6 +4,7 @@
 #import <UIKit/UIKit.h>
 #import <notify.h>
 #import <sys/sysctl.h>
+#import <spawn.h>
 #import <mach/mach.h>
 #import <mach/mach_host.h>
 
@@ -58,6 +59,58 @@ static float readFreeRAMMB(void) {
     BOOL _isNotifyRegistered;
 }
 
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    // Thêm nút Respring ở góc trên bên phải
+    UIBarButtonItem *respringBtn = [[UIBarButtonItem alloc] initWithTitle:@"Respring"
+                                                                    style:UIBarButtonItemStyleDone
+                                                                   target:self
+                                                                   action:@selector(respringPrompt)];
+    self.navigationItem.rightBarButtonItem = respringBtn;
+}
+
+#pragma mark - Respring Action
+
+- (void)respringPrompt {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚡ Respring"
+                                                                   message:@"Khởi động lại SpringBoard để áp dụng toàn bộ thiết lập?"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"Hủy" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Khởi động lại"
+                                             style:UIAlertActionStyleDestructive
+                                           handler:^(UIAlertAction * _Nonnull action) {
+        [self doRespring];
+    }]];
+
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)doRespring {
+    pid_t pid;
+    // Tự động tìm đường dẫn sbreload (Rootless / Rootful)
+    const char *sbreload = "/var/jb/usr/bin/sbreload";
+    if (access(sbreload, X_OK) != 0) {
+        sbreload = "/usr/bin/sbreload";
+    }
+
+    if (access(sbreload, X_OK) == 0) {
+        const char *args[] = {"sbreload", NULL};
+        posix_spawn(&pid, sbreload, NULL, NULL, (char *const *)args, NULL);
+    } else {
+        // Dự phòng bằng killall nếu không có sbreload
+        const char *killall = "/var/jb/usr/bin/killall";
+        if (access(killall, X_OK) != 0) {
+            killall = "/usr/bin/killall";
+        }
+        const char *args[] = {"killall", "-9", "SpringBoard", NULL};
+        posix_spawn(&pid, killall, NULL, NULL, (char *const *)args, NULL);
+    }
+}
+
+#pragma mark - Specifiers
+
 - (NSArray *)specifiers {
     if (!_specifiers) {
         _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
@@ -66,7 +119,6 @@ static float readFreeRAMMB(void) {
     return _specifiers;
 }
 
-// Cập nhật tên hiển thị ngoài menu tương ứng chế độ đang chạy
 - (void)updateModeCellTitle {
     PSSpecifier *spec = [self specifierForID:@"currentModeCell"];
     if (spec) {
@@ -119,7 +171,6 @@ static float readFreeRAMMB(void) {
                                                    handler:nil];
     [alert addAction:cancel];
 
-    // Chống crash trên iPad khi mở ActionSheet
     if (alert.popoverPresentationController) {
         UIView *sourceView = self.view;
         if ([self respondsToSelector:@selector(cachedCellForSpecifier:)]) {
