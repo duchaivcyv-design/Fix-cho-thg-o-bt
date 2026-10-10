@@ -1,9 +1,10 @@
 {
     entry = {
-        bundle = "OptimizerX.bundle";
+        bundle = OptimizerX;
         cell = PSLinkCell;
-        detail = "RootListController";
+        detail = RootListController;
         isController = 1;
-        label = "OptimizerX";
+        label = OptimizerX;
+        icon = icon.png;
     };
 }
