@@ -7,29 +7,23 @@
     <key>items</key>
     <array>
 
-        <!-- CHẾ ĐỘ -->
+        <!-- CHẾ ĐỘ HIỆU NĂNG -->
         <dict>
             <key>cell</key><string>PSGroupCell</string>
             <key>label</key><string>🎯 CHẾ ĐỘ HIỆU NĂNG</string>
-            <key>footerText</key><string>Turbo làm máy nóng. Không bật khi sạc pin.</string>
+            <key>footerText</key><string>Chạm để chọn chế độ (Tiết kiệm, Cân bằng, Hiệu năng, Turbo). Áp dụng ngay tức thì.</string>
         </dict>
         <dict>
-            <key>cell</key><string>PSSegmentedCell</string>
-            <key>label</key><string>Chế độ</string>
-            <key>key</key><string>currentMode</string>
-            <key>default</key><integer>1</integer>
-            <key>segments</key>
-            <array>
-                <string>Tiết kiệm</string>
-                <string>Cân bằng</string>
-                <string>Hiệu năng</string>
-                <string>Turbo</string>
-            </array>
-            <key>segmentValues</key>
-            <array>
-                <integer>0</integer><integer>1</integer>
-                <integer>2</integer><integer>3</integer>
-            </array>
+            <key>cell</key><string>PSButtonCell</string>
+            <key>label</key><string>🎯 Chế độ: Đang tải...</string>
+            <key>action</key><string>showModeMenu:</string>
+            <key>id</key><string>currentModeCell</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSTitleValueCell</string>
+            <key>label</key><string>Thông số trực tiếp</string>
+            <key>get</key><string>liveInfo:</string>
+            <key>id</key><string>liveInfoCell</string>
         </dict>
 
         <!-- HUD -->
@@ -95,17 +89,19 @@
             <key>cell</key><string>PSSliderCell</string>
             <key>label</key><string>Ngưỡng pin (%)</string>
             <key>key</key><string>batteryThreshold</string>
-            <key>default</key><integer>20</integer>
-            <key>min</key><integer>5</integer>
-            <key>max</key><integer>50</integer>
+            <key>default</key><real>20</real>
+            <key>min</key><real>5</real>
+            <key>max</key><real>50</real>
+            <key>showValue</key><true/>
         </dict>
         <dict>
             <key>cell</key><string>PSSliderCell</string>
             <key>label</key><string>Ngưỡng nhiệt (°C)</string>
             <key>key</key><string>tempThreshold</string>
-            <key>default</key><integer>45</integer>
-            <key>min</key><integer>35</integer>
-            <key>max</key><integer>60</integer>
+            <key>default</key><real>45</real>
+            <key>min</key><real>35</real>
+            <key>max</key><real>60</real>
+            <key>showValue</key><true/>
         </dict>
         <dict>
             <key>cell</key><string>PSSwitchCell</string>
@@ -117,9 +113,10 @@
             <key>cell</key><string>PSSliderCell</string>
             <key>label</key><string>Chu kỳ dọn (giây)</string>
             <key>key</key><string>autoCleanInterval</string>
-            <key>default</key><integer>3600</integer>
-            <key>min</key><integer>600</integer>
-            <key>max</key><integer>7200</integer>
+            <key>default</key><real>3600</real>
+            <key>min</key><real>600</real>
+            <key>max</key><real>7200</real>
+            <key>showValue</key><true/>
         </dict>
 
         <!-- MẠNG -->
@@ -135,11 +132,22 @@
             <key>default</key><false/>
         </dict>
 
+        <!-- THAO TÁC HỆ THỐNG -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>footerText</key><string>Nhấn để khởi động lại SpringBoard nếu cần làm mới toàn bộ giao diện.</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSButtonCell</string>
+            <key>label</key><string>⚡ Respring Ngay</string>
+            <key>action</key><string>respringPrompt</string>
+        </dict>
+
         <!-- DISCLAIMER -->
         <dict>
             <key>cell</key><string>PSGroupCell</string>
             <key>label</key><string>⚠️ MIỄN TRỪ TRÁCH NHIỆM</string>
-            <key>footerText</key><string>Tweak chỉ dùng cho mục đích học tập. Không thể ép xung CPU/GPU vì iOS khóa cứng — chỉ có thể giới hạn qua thermal throttling. Turbo mode có thể làm máy nóng, hao pin, hại chip. FPS limit chỉ áp dụng cho app tôn trọng CADisplayLink. Bạn tự chịu rủi ro.</string>
+            <key>footerText</key><string>Tweak dùng cho mục đích tối ưu trải nghiệm. Tùy thuộc tình trạng phần cứng và nhiệt độ thực tế của máy.</string>
         </dict>
 
     </array>
