@@ -1,23 +1,23 @@
 BUNDLE_NAME = OptimizerX
 
 # ─── Nguồn & vị trí cài ────────────────────────────────────────────────────
-OptimizerX_FILES              = RootListController.m
-OptimizerX_INSTALL_PATH       = /Library/PreferenceBundles
+OptimizerX_FILES = RootListController.m
+OptimizerX_INSTALL_PATH = /Library/PreferenceBundles
 
 # ─── Frameworks ────────────────────────────────────────────────────────────
-OptimizerX_FRAMEWORKS         = UIKit
+OptimizerX_FRAMEWORKS = UIKit
 OptimizerX_PRIVATE_FRAMEWORKS = Preferences
 
 # ─── Compile flags ─────────────────────────────────────────────────────────
-OptimizerX_CFLAGS             = -fobjc-arc \
-                                -Wno-deprecated-declarations \
-                                -Wno-everything
+OptimizerX_CFLAGS = -fobjc-arc \
+                    -Wno-deprecated-declarations \
+                    -Wno-everything
 
 # ─── Resources ─────────────────────────────────────────────────────────────
 # Root.plist nằm trong Resources/ → chỉ dùng RESOURCE_DIRS.
 # KHÔNG khai báo thêm RESOURCE_FILES (sẽ copy trùng).
 # Info.plist PHẢI ở Setting/Info.plist (root subproject) — bundle.mk tự copy.
-OptimizerX_RESOURCE_DIRS      = Resources
+OptimizerX_RESOURCE_DIRS = Resources
 
 include $(THEOS_MAKE_PATH)/bundle.mk
 
