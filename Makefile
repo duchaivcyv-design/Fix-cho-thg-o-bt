@@ -1,7 +1,6 @@
 # ─── Theos path ────────────────────────────────────────────────────────────
-# Dùng ?= để KHÔNG ghi đè THEOS từ env.
-# - Trên GitHub Actions: env đã set sẵn → dùng path CI.
-# - Trên iPhone (không có env): fallback /var/jb/var/mobile/theos.
+# Dùng ?= để KHÔNG ghi đè biến THEOS từ env (CI set sẵn).
+# Trên iPhone: fallback /var/jb/var/mobile/theos.
 export THEOS           ?= /var/jb/var/mobile/theos
 export THEOS_MAKE_PATH ?= $(THEOS)/makefiles
 
