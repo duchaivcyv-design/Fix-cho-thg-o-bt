@@ -7,8 +7,16 @@
 #import <mach/mach.h>
 #import <mach/mach_host.h>
 
-#define PREFS_PATH   @"/var/mobile/Library/Preferences/com.tri.optimizerx.plist"
-#define NOTIFY_NAME  "com.tri.optimizerx.changed"
+#define PREFS_PATH_ROOTLESS @"/var/jb/var/mobile/Library/Preferences/com.tri.optimizerx.plist"
+#define PREFS_PATH_ROOTFUL  @"/var/mobile/Library/Preferences/com.tri.optimizerx.plist"
+#define NOTIFY_NAME         "com.tri.optimizerx.changed"
+
+static NSString *getPrefsPath(void) {
+    if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"]) {
+        return PREFS_PATH_ROOTLESS;
+    }
+    return PREFS_PATH_ROOTFUL;
+}
 
 // Các key bắt buộc phải lưu dạng int (vì PSSliderCell trả float)
 static NSSet *intKeys(void) {
@@ -30,10 +38,12 @@ static float readCPUTemp(void) {
         return 30.0f + level * 0.5f;
     return -1.0f;
 }
+
 static int readBattPct(void) {
     [UIDevice currentDevice].batteryMonitoringEnabled = YES;
     return (int)([UIDevice currentDevice].batteryLevel * 100);
 }
+
 static float readFreeRAMMB(void) {
     mach_port_t host = mach_host_self();
     vm_size_t pg = 0; host_page_size(host, &pg);
@@ -44,23 +54,24 @@ static float readFreeRAMMB(void) {
     return -1.0f;
 }
 
-@interface RootListController : PSListController
-@end
-
 @implementation RootListController {
     NSTimer *_liveTimer;
+    int _notifyToken;
+    BOOL _isNotifyRegistered;
 }
 
 - (NSArray *)specifiers {
     if (!_specifiers) {
-        _specifiers = [[self loadSpecifiersFromPlistName:@"Root" target:self] retain];
+        // [ĐÃ SỬA]: Bỏ retain để tuân thủ ARC
+        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
     }
     return _specifiers;
 }
 
 #pragma mark - Ghi mọi thay đổi vào plist + notify tweak
 
-- (void)setPreferenceValue:(id)value forSpecifier:(PSSpecifier *)specifier {
+// [ĐÃ SỬA]: Selector chuẩn của PSListController là specifier:, không phải forSpecifier:
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
     id stored = value;
 
@@ -100,14 +111,20 @@ static float readFreeRAMMB(void) {
         stored = @(s);
     }
 
-    [super setPreferenceValue:stored forSpecifier:specifier];
+    // [ĐÃ SỬA]: Gọi super với đúng selector
+    [super setPreferenceValue:stored specifier:specifier];
 
     if (key.length) {
-        NSMutableDictionary *prefs =
-            [NSMutableDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+        NSString *path = getPrefsPath();
+        NSString *dir = [path stringByDeletingLastPathComponent];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:dir]) {
+            [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        }
+
+        NSMutableDictionary *prefs = [NSMutableDictionary dictionaryWithContentsOfFile:path];
         if (!prefs) prefs = [NSMutableDictionary dictionary];
         prefs[key] = stored ?: @0;
-        [prefs writeToFile:PREFS_PATH atomically:YES];
+        [prefs writeToFile:path atomically:YES];
     }
     notify_post(NOTIFY_NAME);
 
@@ -118,7 +135,8 @@ static float readFreeRAMMB(void) {
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+    NSString *path = getPrefsPath();
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path];
     id v = key ? prefs[key] : nil;
     if (v) return v;
     return [specifier propertyForKey:@"default"];
@@ -127,7 +145,8 @@ static float readFreeRAMMB(void) {
 #pragma mark - Live Info cell (tùy chọn, an toàn nếu plist không có)
 
 - (id)liveInfo:(PSSpecifier *)specifier {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+    NSString *path = getPrefsPath();
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:path];
     int mode = [prefs[@"currentMode"] ?: @(1) intValue];
     if (mode < 0 || mode > 3) mode = 1;
     NSArray *names = @[@"Tiết kiệm", @"Cân bằng", @"Hiệu năng", @"Turbo"];
@@ -141,11 +160,14 @@ static float readFreeRAMMB(void) {
     [super viewWillAppear:animated];
     [self reloadSpecifiers];
 
-    // Lắng nghe thay đổi từ phía tweak (Battery Guard / Thermal tự đổi mode)
-    notify_register_dispatch(NOTIFY_NAME, NULL, dispatch_get_main_queue(),
-                             ^(int token) {
-        [self reloadSpecifiers];
-    });
+    // [ĐÃ SỬA]: Đăng ký dispatch với biến token hợp lệ, tránh đăng ký lặp
+    if (!_isNotifyRegistered) {
+        notify_register_dispatch(NOTIFY_NAME, &_notifyToken, dispatch_get_main_queue(),
+                                 ^(int token) {
+            [self reloadSpecifiers];
+        });
+        _isNotifyRegistered = YES;
+    }
 
     if (!_liveTimer) {
         _liveTimer = [NSTimer scheduledTimerWithTimeInterval:2.0
@@ -160,6 +182,12 @@ static float readFreeRAMMB(void) {
     [super viewWillDisappear:animated];
     [_liveTimer invalidate];
     _liveTimer = nil;
+
+    // [ĐÃ SỬA]: Hủy token khi thoát trang cài đặt
+    if (_isNotifyRegistered) {
+        notify_cancel(_notifyToken);
+        _isNotifyRegistered = NO;
+    }
 }
 
 - (void)refreshLive {
