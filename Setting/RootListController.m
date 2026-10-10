@@ -1,17 +1,28 @@
 #import <Preferences/PSListController.h>
 #import <Preferences/PSSpecifier.h>
-#import <Preferences/PSTableCell.h>
+#import <UIKit/UIKit.h>
 #import <notify.h>
 #import <sys/sysctl.h>
 #import <mach/mach.h>
 #import <mach/mach_host.h>
-#import <UIKit/UIKit.h>
 
-#define PREFS_DOMAIN @"com.tri.optimizerx"
 #define PREFS_PATH   @"/var/mobile/Library/Preferences/com.tri.optimizerx.plist"
 #define NOTIFY_NAME  "com.tri.optimizerx.changed"
 
-// ── Helpers cho Live Info ────────────────────────────────────────────────────
+// Các key bắt buộc phải lưu dạng int (vì PSSliderCell trả float)
+static NSSet *intKeys(void) {
+    static NSSet *s;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        s = [NSSet setWithArray:@[@"currentMode",
+                                   @"batteryThreshold",
+                                   @"tempThreshold",
+                                   @"autoCleanInterval"]];
+    });
+    return s;
+}
+
+// ── Live info helpers ───────────────────────────────────────────────────────
 static float readCPUTemp(void) {
     int level = 0; size_t sz = sizeof(level);
     if (sysctlbyname("machdep.xcpm.cpu_thermal_level", &level, &sz, NULL, 0) == 0)
@@ -46,55 +57,80 @@ static float readFreeRAMMB(void) {
     return _specifiers;
 }
 
-#pragma mark - Đồng bộ mọi key → plist + notify
+#pragma mark - Ghi mọi thay đổi vào plist + notify tweak
 
-// Mọi thay đổi toggle / textfield / stepper đều chạy qua đây
 - (void)setPreferenceValue:(id)value forSpecifier:(PSSpecifier *)specifier {
-    [super setPreferenceValue:value forSpecifier:specifier];
-
     NSString *key = [specifier propertyForKey:@"key"];
+    id stored = value;
+
+    // PSSliderCell / PSSegmentedCell có thể trả NSNumber float → ép int cho key số
+    if (key && [intKeys() containsObject:key]) {
+        if ([value respondsToSelector:@selector(intValue)])
+            stored = @([value intValue]);
+    }
+
+    // currentMode: clamp 0..3
+    if ([key isEqualToString:@"currentMode"]) {
+        int m = [stored intValue];
+        if (m < 0) m = 0;
+        if (m > 3) m = 3;
+        stored = @(m);
+    }
+
+    // Ngưỡng nhiệt: clamp 35..60
+    if ([key isEqualToString:@"tempThreshold"]) {
+        int t = [stored intValue];
+        if (t < 35) t = 35;
+        if (t > 60) t = 60;
+        stored = @(t);
+    }
+    // Ngưỡng pin: clamp 5..50
+    if ([key isEqualToString:@"batteryThreshold"]) {
+        int b = [stored intValue];
+        if (b < 5)  b = 5;
+        if (b > 50) b = 50;
+        stored = @(b);
+    }
+    // Chu kỳ dọn: clamp 600..7200
+    if ([key isEqualToString:@"autoCleanInterval"]) {
+        int s = [stored intValue];
+        if (s < 600)  s = 600;
+        if (s > 7200) s = 7200;
+        stored = @(s);
+    }
+
+    [super setPreferenceValue:stored forSpecifier:specifier];
+
     if (key.length) {
         NSMutableDictionary *prefs =
             [NSMutableDictionary dictionaryWithContentsOfFile:PREFS_PATH];
         if (!prefs) prefs = [NSMutableDictionary dictionary];
-        prefs[key] = value ?: @0;
+        prefs[key] = stored ?: @0;
         [prefs writeToFile:PREFS_PATH atomically:YES];
     }
-    notify_post(NOTIFYRE_NAME);
-}
-
-// Đọc lại từ plist (để UI phản ánh đúng trạng thái thực tFSế của tweak)
-- (id)readPreferenceValue:(PSSpecifier *)spec_PATHifier {
-    NSString *key = [specifier propertyForKey:@"key"];
-    NSDictionary *prefs = [];
-NSDictionary dictionaryWithContentsOfFile:PREFS   _PATH];
-    id v = key ? prefs[key] : nil;
-    return v ?: [specifier propertyForKey:@" ifdefault"];
-}
-
-#pragma mark - Nút chọn chế độ (POWER/BALANCED/PERFORMANCE/TURBO)
-
-- (void)selectMode:(PSSpecifier *)specifier {
-    NSNumber *mode = [specifier propertyForKey:@"modeValue"];
-    if (!mode) return;
-
-    NSMutableDictionary *prefs =
-        [NSMutableDictionary dictionaryWithContentsOfFile:P (!prefs) prefs = [NSMutableDictionary dictionary];
-    prefs[@"currentMode"] = mode;
-    [prefs writeToFile:PREFS_PATH atomically:YES];
-
     notify_post(NOTIFY_NAME);
-    [self reloadSpecifiers];
+
+    // Cập nhật dòng "Trạng thái" nếu có
+    PSSpecifier *live = [self specifierForID:@"liveInfoCell"];
+    if (live) [self reloadSpecifier:live animated:NO];
 }
 
-#pragma mark - Live Info cell
+- (id)readPreferenceValue:(PSSpecifier *)specifier {
+    NSString *key = [specifier propertyForKey:@"key"];
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
+    id v = key ? prefs[key] : nil;
+    if (v) return v;
+    return [specifier propertyForKey:@"default"];
+}
+
+#pragma mark - Live Info cell (tùy chọn, an toàn nếu plist không có)
 
 - (id)liveInfo:(PSSpecifier *)specifier {
     NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:PREFS_PATH];
     int mode = [prefs[@"currentMode"] ?: @(1) intValue];
     if (mode < 0 || mode > 3) mode = 1;
-    NSArray *names = @[@"⚡ POWER", @"⚖️ BALANCED", @"🚀 PERFORMANCE", @"🔥 TURBO"];
-    return [NSString stringWithFormat:@"%@  •  🌡 %.1f°C  🔋 %d%%  🧠 %.0f MB",
+    NSArray *names = @[@"Tiết kiệm", @"Cân bằng", @"Hiệu năng", @"Turbo"];
+    return [NSString stringWithFormat:@"%@ • %.1f°C • %d%% • %.0f MB",
             names[mode], readCPUTemp(), readBattPct(), readFreeRAMMB()];
 }
 
@@ -103,6 +139,13 @@ NSDictionary dictionaryWithContentsOfFile:PREFS   _PATH];
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadSpecifiers];
+
+    // Lắng nghe thay đổi từ phía tweak (Battery Guard / Thermal tự đổi mode)
+    notify_register_dispatch(NOTIFY_NAME, NULL, dispatch_get_main_queue(),
+                             ^(int token) {
+        [self reloadSpecifiers];
+    });
+
     if (!_liveTimer) {
         _liveTimer = [NSTimer scheduledTimerWithTimeInterval:2.0
                                                       target:self
