@@ -243,7 +243,7 @@ static void applySmoothTouch(void) {
 }
 
 static void restoreSmoothTouch(void) {
-    UIWindowf *win = getKeyWindow();
+    UIWindow *win = getKeyWindow();
     if (win) win.layer.speed = 1.0;
     safe_system("defaults write com.apple.Accessibility ReduceMotionEnabled -bool NO 2>/dev/null");
     safe_system("defaults delete -g NSAutoscrollEnabled 2>/dev/null");
