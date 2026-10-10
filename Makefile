@@ -10,7 +10,7 @@ STRIP = 0
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = OptimizerX
-OptimizerX_FILES = OptimizerX.mm
+OptimizerX_FILES = Tweak.xm
 OptimizerX_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error=deprecated-declarations -Wno-everything
 OptimizerX_FRAMEWORKS = Foundation UIKit IOKit
 OptimizerX_LIBRARIES = substrate
