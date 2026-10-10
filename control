@@ -1,0 +1,9 @@
+Package: com.vtrucios.optimizerx
+Name: OptimizerX
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Tối ưu iPhone với nhiều chế độ, HUD thông số, giao diện Cài đặt đẹp
+Maintainer: VtrucXMtris
+Author: VtrucXMtris
+Section: Tweaks
+Depends: mobilesubstrate, preferenceloader, firmware (>= 14.0)
