@@ -1,10 +1,9 @@
-name: Build Dynamic Island
+name: Build OptimizerX
 
 on:
   push:
     branches: [ main, master ]
-    tags:
-      - 'v*.*.*'
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -13,198 +12,170 @@ permissions:
   contents: write
 
 jobs:
-  # ==========================================================
-  # JOB 1: SETUP THEOS + AUTO-GEN ICONS
-  # ==========================================================
-  setup-theos:
-    name: Setup Theos + Generate Icons
-    runs-on: macos-latest
+  # ═══════════════════════════════════════════════════════════
+  # JOB 1 — Build rootless .deb (mặc định cho iOS 15-16)
+  # ═══════════════════════════════════════════════════════════
+  build-rootless:
+    name: Build Rootless (iOS 15-16)
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          brew install ldid || brew install --HEAD ldid || true
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          echo "/usr/local/bin" >> $GITHUB_PATH
+          sudo apt-get update
+          sudo apt-get install -y \
+            git make clang fakeroot dpkg-dev \
+            libssl-dev libplist-dev libxml2-dev libz-dev \
+            zip unzip xz-utils curl
 
-      - name: Install Pillow
+      - name: Set env
         run: |
-          python3 -m pip install --break-system-packages --upgrade pip || true
-          python3 -m pip install --break-system-packages Pillow
+          echo "THEOS=$HOME/theos"               >> $GITHUB_ENV
+          echo "THEOS_MAKE_PATH=$HOME/theos/makefiles" >> $GITHUB_ENV
 
-      - name: Generate icons
-        run: |
-          python3 << 'PYEOF'
-          from PIL import Image, ImageDraw, ImageFilter
-          import os
-
-          def make_icon(size, path):
-              img = Image.new('RGB', (size, size), (0, 0, 0))
-              draw = ImageDraw.Draw(img)
-              for y in range(size):
-                  t = y / size
-                  if t < 0.5:
-                      tt = t * 2
-                      r = int(30 + (80 - 30) * tt)
-                      g = int(120 + (200 - 120) * tt)
-                      b = int(220 + (150 - 220) * tt)
-                  else:
-                      tt = (t - 0.5) * 2
-                      r = int(80 + (240 - 80) * tt)
-                      g = int(200 + (200 - 200) * tt)
-                      b = int(150 + (80 - 150) * tt)
-                  draw.line([(0, y), (size, y)], fill=(r, g, b))
-              bm = int(size * 0.08); cr = int(size * 0.15); bw = max(2, int(size * 0.03))
-              for i in range(bw):
-                  draw.rounded_rectangle([bm-i, bm-i, size-bm+i, size-bm+i], radius=cr+i, outline=(60, 60, 65))
-              pill_w = int(size * 0.42); pill_h = int(size * 0.09)
-              pill_x = (size - pill_w) // 2; pill_y = int(size * 0.12); pill_r = pill_h // 2
-              shadow = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-              sd = ImageDraw.Draw(shadow)
-              sd.rounded_rectangle([pill_x-2, pill_y-2, pill_x+pill_w+2, pill_y+pill_h+2], radius=pill_r+2, fill=(0, 0, 0, 80))
-              shadow = shadow.filter(ImageFilter.GaussianBlur(radius=3))
-              img = Image.alpha_composite(img.convert('RGBA'), shadow).convert('RGB')
-              draw = ImageDraw.Draw(img)
-              draw.rounded_rectangle([pill_x, pill_y, pill_x+pill_w, pill_y+pill_h], radius=pill_r, fill=(0, 0, 0))
-              cam_r = int(pill_h * 0.28); cam_cx = pill_x + pill_w - int(pill_h * 0.45); cam_cy = pill_y + pill_h // 2
-              draw.ellipse([cam_cx-cam_r, cam_cy-cam_r, cam_cx+cam_r, cam_cy+cam_r], fill=(20, 20, 25))
-              draw.ellipse([cam_cx-cam_r+1, cam_cy-cam_r+1, cam_cx-cam_r+3, cam_cy-cam_r+3], fill=(80, 80, 90))
-              os.makedirs(os.path.dirname(path), exist_ok=True)
-              img.save(path, 'PNG')
-              print(f"✅ {path} ({size}x{size})")
-
-          make_icon(58, 'Resources/icon@2x.png')
-          make_icon(87, 'Resources/icon@3x.png')
-          make_icon(58, 'prefs/Resources/icon@2x.png')
-          make_icon(87, 'prefs/Resources/icon@3x.png')
-          print("\n📸 4 icon đã tạo")
-          PYEOF
-
-      - name: Upload generated icons (artifacts)
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-icons
-          path: |
-            Resources/icon@*.png
-            prefs/Resources/icon@*.png
-
-      - name: Cache Theos & SDKs
+      - name: Cache Theos
         id: cache-theos
         uses: actions/cache@v4
         with:
           path: ~/theos
-          key: theos-${{ runner.os }}-sdk16-v1
+          key: theos-ubuntu-${{ hashFiles('.github/workflows/build.yml') }}-v2
 
-      - name: Setup Theos and iOS 16.5 SDK
+      - name: Clone Theos
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
-          export THEOS=$HOME/theos
-          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
+          git clone --recursive --depth 1 \
+            https://github.com/theos/theos.git $THEOS
+
+      - name: Ensure SDK exists
+        run: |
           mkdir -p $THEOS/sdks
-          curl -LO https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
-          tar -xf iPhoneOS16.5.sdk.tar.xz -C $THEOS/sdks
-          rm -f iPhoneOS16.5.sdk.tar.xz
+          if [ ! -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
+            cd $THEOS/sdks
+            curl -L -o sdk.tar.xz \
+              https://github.com/theos/sdks/raw/master/iPhoneOS16.5.sdk.tar.xz
+            tar -xf sdk.tar.xz
+            rm sdk.tar.xz
+          fi
 
-  # ==========================================================
-  # JOB 2: BUILD ROOTFUL (iOS 14-15)
-  # ==========================================================
-  build-rootful:
-    name: Build Rootful (iOS 14-15)
-    runs-on: macos-latest
-    needs: setup-theos
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/theos
-          key: theos-${{ runner.os }}-sdk16-v1
-
-      - name: Download generated icons
-        uses: actions/download-artifact@v4
-        with:
-          name: generated-icons
-
-      - name: Install ldid
-        run: brew install ldid || brew install --HEAD ldid || true
-
-      - name: Build rootful
+      - name: Ensure ldid exists
         run: |
-          export THEOS=$HOME/theos
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$THEOS/bin:$PATH"
-          sed -i '' 's/^Architecture:.*/Architecture: iphoneos-arm/' control
-          make clean
-          make package FINALPACKAGE=1
-
-      - name: Rename output
-        run: |
-          mkdir -p dist
-          VERSION=$(grep '^Version:' control | awk '{print $2}')
-          cp packages/*.deb dist/dynamicisland-rootful_${VERSION}.deb
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deb-rootful
-          path: dist/*.deb
-
-  # ==========================================================
-  # JOB 3: BUILD ROOTLESS (iOS 15-16)
-  # ==========================================================
-  build-rootless:
-    name: Build Rootless (iOS 15-16)
-    runs-on: macos-latest
-    needs: setup-theos
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/theos
-          key: theos-${{ runner.os }}-sdk16-v1
-
-      - name: Download generated icons
-        uses: actions/download-artifact@v4
-        with:
-          name: generated-icons
-
-      - name: Install ldid
-        run: brew install ldid || brew install --HEAD ldid || true
+          mkdir -p $THEOS/toolchain/linux/iphone/bin
+          if [ ! -x "$THEOS/toolchain/linux/iphone/bin/ldid" ]; then
+            curl -L -o $THEOS/toolchain/linux/iphone/bin/ldid \
+              https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64
+            chmod +x $THEOS/toolchain/linux/iphone/bin/ldid
+          fi
 
       - name: Build rootless
         run: |
-          export THEOS=$HOME/theos
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$THEOS/bin:$PATH"
-          sed -i '' 's/^Architecture:.*/Architecture: iphoneos-arm64/' control
-          make clean
+          rm -rf .theos packages
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Verify
+        run: |
+          ls -lh packages/
+          dpkg-deb -c packages/*.deb
 
       - name: Rename output
         run: |
           mkdir -p dist
           VERSION=$(grep '^Version:' control | awk '{print $2}')
-          cp packages/*.deb dist/dynamicisland-rootless_${VERSION}.deb
+          cp packages/*.deb dist/optimizerx-rootless_${VERSION}.deb
 
       - uses: actions/upload-artifact@v4
         with:
           name: deb-rootless
           path: dist/*.deb
 
-  # ==========================================================
-  # JOB 4: RELEASE
-  # ==========================================================
+  # ═══════════════════════════════════════════════════════════
+  # JOB 2 — Build rootful .deb (iOS 14-15)
+  # ═══════════════════════════════════════════════════════════
+  build-rootful:
+    name: Build Rootful (iOS 14-15)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git make clang fakeroot dpkg-dev \
+            libssl-dev libplist-dev libxml2-dev libz-dev \
+            zip unzip xz-utils curl
+
+      - name: Set env
+        run: |
+          echo "THEOS=$HOME/theos"               >> $GITHUB_ENV
+          echo "THEOS_MAKE_PATH=$HOME/theos/makefiles" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/theos
+          key: theos-ubuntu-${{ hashFiles('.github/workflows/build.yml') }}-v2
+
+      - name: Clone Theos
+        run: |
+          if [ ! -d "$THEOS" ]; then
+            git clone --recursive --depth 1 \
+              https://github.com/theos/theos.git $THEOS
+          fi
+
+      - name: Ensure SDK + ldid
+        run: |
+          mkdir -p $THEOS/sdks
+          if [ ! -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
+            cd $THEOS/sdks
+            curl -L -o16 sdk.tar.xz \
+              https.://github.com/theos/sdks/raw/master/iPhoneOS5.sdk.tar.xz
+            tar -xf sdk.tar.xz && rm sdk.tar.xz
+          fi
+
+          mkdir -p $THEOS/toolchain/linux/iphone/bin
+          if [ ! -x "$THEOS/toolchain/linux/iphone/bin/ldid" ]; then
+            curl -L -o $THEOS/toolchain/linux/iphone/bin/ldid \
+              https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64
+            chmod +x $THEOS/toolchain/linux/iphone/bin/ldid
+          fi
+
+      - name: Patch control for rootful
+        run: |
+          sed -i 's/^Architecture:.*/Architecture: iphoneos-arm/' control
+          sed -i 's/^THEOS_PACKAGE_SCHEME.*/# THEOS_PACKAGE_SCHEME = rootless/' Makefile || true
+
+      - name: Build rootful
+        run: |
+          rm -rf .theos packages
+          make package FINALPACKAGE=1
+
+      - name: Rename output
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^Version:' control | awk '{print $2}')
+          cp packages/*.deb dist/optimizerx-rootful_${VERSION}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-rootful
+          path: dist/*.deb
+
+  # ═══════════════════════════════════════════════════════════
+  # JOB 3 — Release (chỉ chạy khi push tag)
+  # ═══════════════════════════════════════════════════════════
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-rootful, build-rootless]
+    needs: [ build-rootless, build-rootful ]
     if: startsWith(github.ref, 'refs/tags/v')
+
     steps:
       - uses: actions/checkout@v4
 
@@ -226,7 +197,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Dynamic Island v${{ steps.version.outputs.VERSION }}
+          name: OptimizerX v${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -234,19 +205,20 @@ jobs:
             release/*.deb
             release/SHA256SUMS.txt
 
-  # ==========================================================
-  # JOB 5: SUMMARY
-  # ==========================================================
+  # ═══════════════════════════════════════════════════════════
+  # JOB 4 — Summary
+  # ═══════════════════════════════════════════════════════════
   summary:
-    name: Build Summary
+    name: Summary
     runs-on: ubuntu-latest
-    needs: [build-rootful, build-rootless]
+    needs: [ build-rootless, build-rootful ]
     if: always()
+
     steps:
       - run: |
           echo "## 🎯 Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Scheme | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Rootful (iOS 14-15) | ${{ needs.build-rootful.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Rootless (iOS 15-16) | ${{ needs.build-rootless.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rootless | ${{ needs.build-rootless.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rootful  | ${{ needs.build-rootful.result }} |" >> $GITHUB_STEP_SUMMARY
