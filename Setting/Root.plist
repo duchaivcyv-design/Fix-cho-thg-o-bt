@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>title</key>
+    <string>OptimizerX</string>
+    <key>items</key>
+    <array>
+
+        <!-- CHẾ ĐỘ -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>🎯 CHẾ ĐỘ HIỆU NĂNG</string>
+            <key>footerText</key><string>Turbo làm máy nóng. Không bật khi sạc pin.</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSegmentedCell</string>
+            <key>label</key><string>Chế độ</string>
+            <key>key</key><string>currentMode</string>
+            <key>default</key><integer>1</integer>
+            <key>segments</key>
+            <array>
+                <string>Tiết kiệm</string>
+                <string>Cân bằng</string>
+                <string>Hiệu năng</string>
+                <string>Turbo</string>
+            </array>
+            <key>segmentValues</key>
+            <array>
+                <integer>0</integer><integer>1</integer>
+                <integer>2</integer><integer>3</integer>
+            </array>
+        </dict>
+
+        <!-- HUD -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>📊 HUD THÔNG SỐ</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Hiện HUD nổi</string>
+            <key>key</key><string>showHUD</string>
+            <key>default</key><true/>
+        </dict>
+
+        <!-- MƯỢT & NHẠY -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>✨ MƯỢT & NHẠY</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Giảm animation</string>
+            <key>key</key><string>reduceMotion</string>
+            <key>default</key><true/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Tăng tốc animation 1.5x</string>
+            <key>key</key><string>fastAnimation</string>
+            <key>default</key><true/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Scroll mượt</string>
+            <key>key</key><string>smoothScroll</string>
+            <key>default</key><true/>
+        </dict>
+
+        <!-- NHIỆT ĐỘ -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>🌡️ NHIỆT ĐỘ</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Tự hạ mode khi nóng</string>
+            <key>key</key><string>thermalAction</string>
+            <key>default</key><true/>
+        </dict>
+
+        <!-- TỰ ĐỘNG -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>🚀 TỰ ĐỘNG</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Battery Guard</string>
+            <key>key</key><string>batteryGuard</string>
+            <key>default</key><true/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSliderCell</string>
+            <key>label</key><string>Ngưỡng pin (%)</string>
+            <key>key</key><string>batteryThreshold</string>
+            <key>default</key><integer>20</integer>
+            <key>min</key><integer>5</integer>
+            <key>max</key><integer>50</integer>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSliderCell</string>
+            <key>label</key><string>Ngưỡng nhiệt (°C)</string>
+            <key>key</key><string>tempThreshold</string>
+            <key>default</key><integer>45</integer>
+            <key>min</key><integer>35</integer>
+            <key>max</key><integer>60</integer>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Tự động dọn cache</string>
+            <key>key</key><string>autoClean</string>
+            <key>default</key><false/>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSliderCell</string>
+            <key>label</key><string>Chu kỳ dọn (giây)</string>
+            <key>key</key><string>autoCleanInterval</string>
+            <key>default</key><integer>3600</integer>
+            <key>min</key><integer>600</integer>
+            <key>max</key><integer>7200</integer>
+        </dict>
+
+        <!-- MẠNG -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>🌐 MẠNG</string>
+            <key>footerText</key><string>Đổi DNS sang Cloudflare. Có thể xung đột VPN.</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Tối ưu mạng</string>
+            <key>key</key><string>optimizeNetwork</string>
+            <key>default</key><false/>
+        </dict>
+
+        <!-- DISCLAIMER -->
+        <dict>
+            <key>cell</key><string>PSGroupCell</string>
+            <key>label</key><string>⚠️ MIỄN TRỪ TRÁCH NHIỆM</string>
+            <key>footerText</key><string>Tweak chỉ dùng cho mục đích học tập. Không thể ép xung CPU/GPU vì iOS khóa cứng — chỉ có thể giới hạn qua thermal throttling. Turbo mode có thể làm máy nóng, hao pin, hại chip. FPS limit chỉ áp dụng cho app tôn trọng CADisplayLink. Bạn tự chịu rủi ro.</string>
+        </dict>
+
+    </array>
+</dict>
+</plist>
