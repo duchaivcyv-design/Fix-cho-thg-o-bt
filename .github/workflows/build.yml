@@ -1,183 +1,252 @@
-name: Build BoostiPhone6s Rootless Deb
+name: Build Dynamic Island
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-deb:
-    runs-on: macos-14
-    timeout-minutes: 15
-
+  # ==========================================================
+  # JOB 1: SETUP THEOS + AUTO-GEN ICONS
+  # ==========================================================
+  setup-theos:
+    name: Setup Theos + Generate Icons
+    runs-on: macos-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ============================================================
-      # CACHE THEOS + SDK + HOMEBREW PACKAGES
-      # ============================================================
-      - name: Cache Theos + SDK
+      - name: Install Dependencies
+        run: |
+          brew install ldid || brew install --HEAD ldid || true
+          echo "/opt/homebrew/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Install Pillow
+        run: |
+          python3 -m pip install --break-system-packages --upgrade pip || true
+          python3 -m pip install --break-system-packages Pillow
+
+      - name: Generate icons
+        run: |
+          python3 << 'PYEOF'
+          from PIL import Image, ImageDraw, ImageFilter
+          import os
+
+          def make_icon(size, path):
+              img = Image.new('RGB', (size, size), (0, 0, 0))
+              draw = ImageDraw.Draw(img)
+              for y in range(size):
+                  t = y / size
+                  if t < 0.5:
+                      tt = t * 2
+                      r = int(30 + (80 - 30) * tt)
+                      g = int(120 + (200 - 120) * tt)
+                      b = int(220 + (150 - 220) * tt)
+                  else:
+                      tt = (t - 0.5) * 2
+                      r = int(80 + (240 - 80) * tt)
+                      g = int(200 + (200 - 200) * tt)
+                      b = int(150 + (80 - 150) * tt)
+                  draw.line([(0, y), (size, y)], fill=(r, g, b))
+              bm = int(size * 0.08); cr = int(size * 0.15); bw = max(2, int(size * 0.03))
+              for i in range(bw):
+                  draw.rounded_rectangle([bm-i, bm-i, size-bm+i, size-bm+i], radius=cr+i, outline=(60, 60, 65))
+              pill_w = int(size * 0.42); pill_h = int(size * 0.09)
+              pill_x = (size - pill_w) // 2; pill_y = int(size * 0.12); pill_r = pill_h // 2
+              shadow = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+              sd = ImageDraw.Draw(shadow)
+              sd.rounded_rectangle([pill_x-2, pill_y-2, pill_x+pill_w+2, pill_y+pill_h+2], radius=pill_r+2, fill=(0, 0, 0, 80))
+              shadow = shadow.filter(ImageFilter.GaussianBlur(radius=3))
+              img = Image.alpha_composite(img.convert('RGBA'), shadow).convert('RGB')
+              draw = ImageDraw.Draw(img)
+              draw.rounded_rectangle([pill_x, pill_y, pill_x+pill_w, pill_y+pill_h], radius=pill_r, fill=(0, 0, 0))
+              cam_r = int(pill_h * 0.28); cam_cx = pill_x + pill_w - int(pill_h * 0.45); cam_cy = pill_y + pill_h // 2
+              draw.ellipse([cam_cx-cam_r, cam_cy-cam_r, cam_cx+cam_r, cam_cy+cam_r], fill=(20, 20, 25))
+              draw.ellipse([cam_cx-cam_r+1, cam_cy-cam_r+1, cam_cx-cam_r+3, cam_cy-cam_r+3], fill=(80, 80, 90))
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              img.save(path, 'PNG')
+              print(f"✅ {path} ({size}x{size})")
+
+          make_icon(58, 'Resources/icon@2x.png')
+          make_icon(87, 'Resources/icon@3x.png')
+          make_icon(58, 'prefs/Resources/icon@2x.png')
+          make_icon(87, 'prefs/Resources/icon@3x.png')
+          print("\n📸 4 icon đã tạo")
+          PYEOF
+
+      - name: Upload generated icons (artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-icons
+          path: |
+            Resources/icon@*.png
+            prefs/Resources/icon@*.png
+
+      - name: Cache Theos & SDKs
         id: cache-theos
         uses: actions/cache@v4
         with:
-          path: |
-            ~/theos
-            ~/Library/Caches/Homebrew/downloads
-          key: theos-sdk-165-${{ runner.os }}-v3
+          path: ~/theos
+          key: theos-${{ runner.os }}-sdk16-v1
 
-      # ============================================================
-      # CÀI CÔNG CỤ — LUÔN CHẠY, KHÔNG PHỤ THUỘC CACHE
-      # ============================================================
-      - name: Setup Tools (Always Run)
-        run: |
-          export HOMEBREW_NO_AUTO_UPDATE=1
-          export HOMEBREW_NO_INSTALL_CLEANUP=1
-          export HOMEBREW_NO_ANALYTICS=1
-
-          # Cài dpkg + ldid nếu chưa có
-          if ! command -v dpkg-deb &> /dev/null; then
-            echo "📦 Installing dpkg..."
-            brew install dpkg
-          fi
-          if ! command -v ldid &> /dev/null; then
-            echo "🔐 Installing ldid..."
-            brew install ldid
-          fi
-
-          # Xác định đường dẫn ldid thật
-          LDID_PATH=$(which ldid)
-          echo "🔍 ldid found at: $LDID_PATH"
-
-          if [ -z "$LDID_PATH" ]; then
-            echo "❌ ldid install failed!"
-            exit 1
-          fi
-
-          # Đảm bảo $THEOS/bin tồn tại
-          mkdir -p "$HOME/theos/bin"
-
-          # Link ldid vào $THEOS/bin — LUÔN CHẠY (cache hit hay miss đều ok)
-          ln -sf "$LDID_PATH" "$HOME/theos/bin/ldid"
-          chmod +x "$HOME/theos/bin/ldid"
-
-          # Verify
-          "$HOME/theos/bin/ldid" -h 2>&1 | head -1 || echo "⚠️ ldid check"
-
-          # Xuất biến môi trường
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-          echo "$HOME/theos/bin" >> $GITHUB_PATH
-          # Thêm luôn homebrew bin cho chắc
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          echo "THEOS_PACKAGE_SCHEME=rootless" >> $GITHUB_ENV
-          echo "THEOS_NO_AUTO_UPDATE=1" >> $GITHUB_ENV
-
-      # ============================================================
-      # CLONE THEOS + SDK — CHỈ KHI CACHE MISS
-      # ============================================================
-      - name: Clone Theos + SDK (Cache Miss Only)
+      - name: Setup Theos and iOS 16.5 SDK
         if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
-          TARGET_DIR="$HOME/theos"
-          rm -rf "$TARGET_DIR"
-          git clone --recursive --depth=1 https://github.com/theos/theos.git "$TARGET_DIR"
+          export THEOS=$HOME/theos
+          git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
+          mkdir -p $THEOS/sdks
+          curl -LO https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz
+          tar -xf iPhoneOS16.5.sdk.tar.xz -C $THEOS/sdks
+          rm -f iPhoneOS16.5.sdk.tar.xz
 
-          # Tải SDK 16.5 (sparse)
-          mkdir -p "$TARGET_DIR/sdks"
-          git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdks
-          cd /tmp/sdks
-          git sparse-checkout set iPhoneOS16.5.sdk
-          mv iPhoneOS16.5.sdk "$TARGET_DIR/sdks/"
-          rm -rf /tmp/sdks
-
-          echo "✅ Theos + SDK 16.5 cài lần đầu xong"
-
-      # ============================================================
-      # VERIFY LDID TRƯỚC KHI BUILD — ĐẢM BẢO KHÔNG FAIL Ở SIGNING
-      # ============================================================
-      - name: Verify ldid Available
-        run: |
-          echo "=== Verify ldid ==="
-          which ldid || echo "ldid not in PATH"
-          ls -la "$HOME/theos/bin/ldid" || echo "no ldid in theos/bin"
-          file "$HOME/theos/bin/ldid" 2>/dev/null || true
-
-          if [ ! -e "$HOME/theos/bin/ldid" ]; then
-            echo "❌ LỖI: ldid không tồn tại trong $HOME/theos/bin/"
-            # Fallback: cài lại trực tiếp
-            brew install ldid || true
-            mkdir -p "$HOME/theos/bin"
-            ln -sf "$(which ldid)" "$HOME/theos/bin/ldid"
-          fi
-
-          "$HOME/theos/bin/ldid" -h 2>&1 | head -3
-          echo "✅ ldid OK"
-
-      # ============================================================
-      # BUILD — CHỈ `make package`
-      # ============================================================
-      - name: Build Package (Rootless)
-        run: |
-          cd "$GITHUB_WORKSPACE"
-
-          if [ ! -f Makefile ]; then
-            echo "❌ Không tìm thấy Makefile!"; exit 1
-          fi
-
-          rm -rf packages obj .theos
-
-          # Fix quyền DEBIAN
-          for DEBIAN_DIR in "layout/DEBIAN" "DEBIAN"; do
-            if [ -d "$DEBIAN_DIR" ]; then
-              find "$DEBIAN_DIR" -type f -exec chmod 644 {} +
-              find "$DEBIAN_DIR" -type f \( -name "postinst" -o -name "prerm" -o -name "postrm" -o -name "preinst" \) -exec chmod 755 {} +
-              chmod 755 "$DEBIAN_DIR"
-            fi
-          done
-
-          # Ensure ldid is symlinked once more before build
-          mkdir -p "$HOME/theos/bin"
-          if [ ! -e "$HOME/theos/bin/ldid" ]; then
-            ln -sf "$(which ldid)" "$HOME/theos/bin/ldid"
-          fi
-
-          BUILD_LOG="/tmp/theos_build.log"
-          set -o pipefail
-          NCPU=$(sysctl -n hw.ncpu | head -1)
-          if [ -z "$NCPU" ] || [ "$NCPU" -lt 2 ]; then NCPU=4; fi
-
-          make package \
-            FINALPACKAGE=1 \
-            THEOS_PACKAGE_SCHEME=rootless \
-            SDKVERSION=16.5 \
-            -j"$NCPU" 2>&1 | tee "$BUILD_LOG" || BUILD_FAILED=1
-
-          if [ "$BUILD_FAILED" = "1" ]; then
-            echo ""
-            echo "======================================================================"
-            echo "🚨 BIÊN DỊCH THẤT BẠI!"
-            echo "======================================================================"
-            grep -E '(error:|fatal error:|command not found)' "$BUILD_LOG" || true
-            echo ""
-            tail -n 60 "$BUILD_LOG"
-            exit 1
-          fi
-
-          ls -lh packages/*.deb
-
-      # ============================================================
-      # UPLOAD ARTIFACT
-      # ============================================================
-      - name: Upload Deb Artifact
-        uses: actions/upload-artifact@v4
+  # ==========================================================
+  # JOB 2: BUILD ROOTFUL (iOS 14-15)
+  # ==========================================================
+  build-rootful:
+    name: Build Rootful (iOS 14-15)
+    runs-on: macos-latest
+    needs: setup-theos
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: BoostiPhone6s-Rootless-FullPackage
-          path: packages/*.deb
-          if-no-files-found: error
-          compression-level: 0
+          submodules: recursive
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/theos
+          key: theos-${{ runner.os }}-sdk16-v1
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-icons
+
+      - name: Install ldid
+        run: brew install ldid || brew install --HEAD ldid || true
+
+      - name: Build rootful
+        run: |
+          export THEOS=$HOME/theos
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$THEOS/bin:$PATH"
+          sed -i '' 's/^Architecture:.*/Architecture: iphoneos-arm/' control
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Rename output
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^Version:' control | awk '{print $2}')
+          cp packages/*.deb dist/dynamicisland-rootful_${VERSION}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-rootful
+          path: dist/*.deb
+
+  # ==========================================================
+  # JOB 3: BUILD ROOTLESS (iOS 15-16)
+  # ==========================================================
+  build-rootless:
+    name: Build Rootless (iOS 15-16)
+    runs-on: macos-latest
+    needs: setup-theos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/theos
+          key: theos-${{ runner.os }}-sdk16-v1
+
+      - name: Download generated icons
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-icons
+
+      - name: Install ldid
+        run: brew install ldid || brew install --HEAD ldid || true
+
+      - name: Build rootless
+        run: |
+          export THEOS=$HOME/theos
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$THEOS/bin:$PATH"
+          sed -i '' 's/^Architecture:.*/Architecture: iphoneos-arm64/' control
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Rename output
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^Version:' control | awk '{print $2}')
+          cp packages/*.deb dist/dynamicisland-rootless_${VERSION}.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-rootless
+          path: dist/*.deb
+
+  # ==========================================================
+  # JOB 4: RELEASE
+  # ==========================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-rootful, build-rootless]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release
+        run: |
+          mkdir -p release
+          find artifacts -name '*.deb' -exec cp {} release/ \;
+          cd release
+          sha256sum *.deb > SHA256SUMS.txt
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Dynamic Island v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release/*.deb
+            release/SHA256SUMS.txt
+
+  # ==========================================================
+  # JOB 5: SUMMARY
+  # ==========================================================
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-rootful, build-rootless]
+    if: always()
+    steps:
+      - run: |
+          echo "## 🎯 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scheme | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Rootful (iOS 14-15) | ${{ needs.build-rootful.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rootless (iOS 15-16) | ${{ needs.build-rootless.result }} |" >> $GITHUB_STEP_SUMMARY
